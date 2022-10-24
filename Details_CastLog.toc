@@ -1,0 +1,6 @@
+## Interface: 100000
+## Title: Details! Cast Log (plugin)
+## Notes: Records log of spell casting for each player in the group
+## RequiredDeps: Details
+
+Details_CastLog.lua
