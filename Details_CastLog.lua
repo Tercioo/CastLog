@@ -29,7 +29,12 @@ do
 
 	--minimal details version required to run this plugin
 	local MINIMAL_DETAILS_VERSION_REQUIRED = 136
-	local CASTLOG_VERSION = "v1.0.0"
+	local CASTLOG_VERSION = "v2.0.0"
+
+	local CONST_COOLDOWN_TYPE_OFFENSIVE = 1
+	local CONST_COOLDOWN_TYPE_DEFENSIVE_PERSONAL = 2
+	local CONST_COOLDOWN_TYPE_DEFENSIVE_TARGET = 3
+	local CONST_COOLDOWN_TYPE_DEFENSIVE_RAID = 4
 
 	--create a plugin object
 	local castLog = Details:NewPluginObject("Details_CastLog", _G.DETAILSPLUGIN_ALWAYSENABLED)
@@ -63,6 +68,24 @@ do
 		end
 	end
 
+	function castLog.GetActorObjectFromGUID(combat, GUID)
+		local damageActors = combat[1]._ActorTable
+		for i = 1, #damageActors do
+			local actor = damageActors[i]
+			if (actor.serial == GUID) then
+				return actor
+			end
+		end
+
+		local healingActors = combat[2]._ActorTable
+		for i = 1, #healingActors do
+			local actor = healingActors[i]
+			if (actor.serial == GUID) then
+				return actor
+			end
+		end
+	end
+
 	function castLog.InstallTab()
 		local tabName = "CastTimeline"
 		local tabNameLoc = "Timeline"
@@ -79,62 +102,49 @@ do
 
 		local fillTab = function(tab, playerObject, combat)
 			function castLog.UpdateTimelineFrame()
-				local castData = combat.spells_cast_timeline[playerObject and playerObject.serial]
-				if (castData and castData[1]) then
-					local spellData = {}
+				if (castLog.db.only_players_attack_cooldowns or castLog.db.only_players_defensive_cooldowns) then
 
-					local firstAbilityUsedTime = castData[1][1] --gettime
 					local combatTime = combat:GetCombatTime() --seconds elapsed
 					local combatStartTime = combat:GetStartTime() --gettime
-					local combatEndTime = combat:GetEndTime() --gettime
 
-					castLog.currentPlayerClass = playerObject.classe
+					local onlyShowAttackCDs = castLog.db.only_players_attack_cooldowns
+					local onlyShowDefensiveCDs = castLog.db.only_players_defensive_cooldowns
+					local castData = combat.spells_cast_timeline or {} --uses GUID has key
 
-					local auraData = combat.aura_timeline[playerObject and playerObject.serial]
-					local onlyShowAuras = castLog.db.only_auras
+					local ignoredSpells = castLog.db.ignored_spells
+					local ignoredSpellForAllClasses = ignoredSpells.ALL
 
-					--cast data
-					for i = 1, #castData do
-						local cast = castData[i]
-						local atTime = cast[1] --when it was casted
-						local spellId = cast[2]
-						local payload = cast[3] --contains the spell target
+					local playerData = {} --playerData[GUID] = {{time, 10, 0, 0 spellId}, {time, 10, 0, 0 spellId}, {time, 10, 0, 0 spellId}, {time, 10, 0, 0 spellId}}
 
-						local hasCooldownType = LIB_OPEN_RAID_COOLDOWNS_INFO[spellId] and LIB_OPEN_RAID_COOLDOWNS_INFO[spellId].type
+					--iterate among all players and build a list of cooldown usage of offensive or defensive cooldowns
+					for playerGUID, castTable in pairs(castData) do
+						local actorObject = castLog.GetActorObjectFromGUID(combat, playerGUID)
+						if (actorObject) then
+							local playerClass = actorObject:Class()
+							local ignoredSpellsForClass = ignoredSpells[playerClass]
 
-						if (not castLog.db.only_cooldowns or hasCooldownType) then
-							local auraTimers = auraData[spellId]
-							if (auraTimers) then
-								auraTimers = auraTimers.data
-								local foundAuraTimer = false
+							local thisPlayerData = {}
+							playerData[playerGUID] = thisPlayerData
 
-								for o = 1, #auraTimers do
-									local auraTimer = auraTimers[o]
+							--castTable is a indexed table with {time, spellId, target}
+							for i = 1, #castTable do
+								local castEvent = castTable[i]
+								local atTime = castEvent[1]
+								local spellId = castEvent[2]
+								local payload = castEvent[3]
 
-									if (detailsFramework:IsNearlyEqual(auraTimer[1], atTime, 0.650)) then --when it was applyed, using 650ms as latency compensation
-										foundAuraTimer = true
+								--check if the spell isn't ignored
+								if (not ignoredSpellsForClass[spellId] and not ignoredSpellForAllClasses[spellId]) then
+									--get the cooldown type
+									local cdType = LIB_OPEN_RAID_COOLDOWNS_INFO[spellId] and LIB_OPEN_RAID_COOLDOWNS_INFO[spellId].type
+									if (cdType) then
+										if (onlyShowAttackCDs and cdType == CONST_COOLDOWN_TYPE_OFFENSIVE) then
+											thisPlayerData[#thisPlayerData+1] = {atTime - combatStartTime, 10, 0, 0, spellId, ["payload"] = payload} --has 5 indexes, the 5th is the spellId
 
-										local auraActivationData = auraTimer
-										local applied = auraActivationData[1]
-										local wentOff = auraActivationData[2]
-										local duration = wentOff - applied
-
-										spellData[spellId] = spellData[spellId] or {}
-										tinsert(spellData[spellId], {applied - combatStartTime, 10, duration, duration, ["payload"] = payload})
-										break
+										elseif (onlyShowDefensiveCDs and (cdType == CONST_COOLDOWN_TYPE_DEFENSIVE_PERSONAL or cdType == CONST_COOLDOWN_TYPE_DEFENSIVE_TARGET or cdType == CONST_COOLDOWN_TYPE_DEFENSIVE_RAID)) then
+											thisPlayerData[#thisPlayerData+1] = {atTime - combatStartTime, 10, 0, 0, spellId, ["payload"] = payload} --has 5 indexes, the 5th is the spellId
+										end
 									end
-								end
-
-								if (not foundAuraTimer) then
-									if (not onlyShowAuras) then
-										spellData[spellId] = spellData[spellId] or {}
-										tinsert(spellData[spellId], {atTime - combatStartTime, 1, ["payload"] = payload})
-									end
-								end
-							else
-								if (not onlyShowAuras) then
-									spellData[spellId] = spellData[spellId] or {}
-									tinsert(spellData[spellId], {atTime - combatStartTime, 1, ["payload"] = payload})
 								end
 							end
 						end
@@ -147,26 +157,54 @@ do
 						lines = {},
 					}
 
-					do
-						local ignoredSpells = castLog.db.ignored_spells
-						local playerClass = castLog.currentPlayerClass
-						local ignoredSpellsForClass = ignoredSpells[playerClass]
-						local ignoredSpellForAllClasses = ignoredSpells.ALL
+					local resultTable = {}
 
-						for spellId, spellTimers in pairs(spellData) do
-							--check if the spell isn't ignored
-							if (not ignoredSpellsForClass[spellId] and not ignoredSpellForAllClasses[spellId]) then
-								local spellName, rank, spellIcon = GetSpellInfo(spellId)
+					for playerGUID, playerCooldownUsage in pairs(playerData) do
+						local actorObject = castLog.GetActorObjectFromGUID(combat, playerGUID)
+						if (actorObject) then
+							local useAlpha = false
+							local specTexture, left, right, top, bottom = Details:GetSpecIcon(actorObject.spec, useAlpha)
 
-								local spellTable = {
-									text = spellName,
-									icon = spellIcon,
-									spellId = spellId,
-									timeline = spellTimers, --each table inside has the .payload
-								}
-								tinsert(scrollData.lines, spellTable)
+							specTexture = specTexture or ""
+							left = left or 0
+							right = right or 1
+							top = top or 0
+							bottom = bottom or 1
+
+							local playerNameNoRealm = actorObject:GetOnlyName() or "no player"
+
+							local role = Details.specToRole[actorObject.spec] or "NONE"
+							local roleId = 0
+
+							if (castLog.db.only_players_attack_cooldowns) then
+								roleId = role == "DAMAGER" and 1 or role == "HEALER" and 2 or role == "TANK" and 3 or "NONE" and 0
+
+							elseif (castLog.db.only_players_defensive_cooldowns) then
+								roleId = role == "DAMAGER" and 3 or role == "HEALER" and 2 or role == "TANK" and 1 or "NONE" and 0
 							end
+
+							roleId = roleId + (string.byte(playerNameNoRealm, 1) + (string.byte(playerNameNoRealm, 2)) / 4) / 1000
+
+							--[1] icon [2] GUID [3] player name [4] cooldown usage [5] role
+							resultTable[#resultTable+1] = {{specTexture, left, right, top, bottom}, playerGUID, playerNameNoRealm, playerCooldownUsage, role, roleId}
 						end
+					end
+
+					table.sort(resultTable, function(t1, t2) return t1[6] < t2[6] end)
+
+					for i, resultData in ipairs(resultTable) do
+						--doing the sort thing and after add the tables inthe the scrollData
+						--create the line information for this player
+						local playerTable = {
+							isPlayer = true,
+							text = resultData[3],
+							icon = resultData[1][1],
+							coords = {resultData[1][2], resultData[1][3], resultData[1][4], resultData[1][5]},
+							timeline = resultData[4],
+						}
+
+						--add a new line to the timeline frame
+						tinsert(scrollData.lines, playerTable)
 					end
 
 					tab.frame.timeLineFrame:SetData(scrollData)
@@ -174,21 +212,7 @@ do
 					tab.frame.timeLineFrame.scaleSlider:SetValue(minValue)
 
 					local ignoreSpell = function(self)
-						local spellId = self:GetParent():GetParent().spellId
-						if (spellId) then
-							local ignoredSpells = castLog.db.ignored_spells
-							local classTable = ignoredSpells[castLog.currentPlayerClass]
-
-							if (classTable) then
-								classTable[spellId] = true
-								tab.frame.OpenOptions(1, true)
-								castLog.UpdateTimelineFrame()
-							else
-								detailsFramework:Msg("this actor does not have a class.")
-							end
-						else
-							detailsFramework:Msg("spellId not found for this button.")
-						end
+						return Details:Msg("Can't ignore this unit.")
 					end
 
 					local allLines = tab.frame.timeLineFrame.lines
@@ -205,12 +229,158 @@ do
 							ignoreButtton:SetBackdropBorderColor(0, 0, 0, 0)
 							ignoreButtton.onenter_backdrop_border_color = {0, 0, 0, 0}
 							ignoreButtton.onleave_backdrop_border_color = {0, 0, 0, 0}
+						else
+							lineHeader.ignoreButtton:SetClickFunction(ignoreSpell)
 						end
+
+						lineHeader.ignoreButtton:SetAlpha(0.2)
 					end
+
 				else
-					--this player has no timeline data to show
-					--clear the timeline frame, or unselect it and show the overall spells breakdown
-					print("there's no data for player", playerObject and playerObject.nome)
+					--get the player cast data
+					local castData = combat.spells_cast_timeline[playerObject and playerObject.serial]
+					--if there at least one event?
+					if (castData and castData[1]) then
+						local spellData = {}
+
+						local firstAbilityUsedTime = castData[1][1] --gettime
+						local combatTime = combat:GetCombatTime() --seconds elapsed
+						local combatStartTime = combat:GetStartTime() --gettime
+						local combatEndTime = combat:GetEndTime() --gettime
+
+						castLog.currentPlayerClass = playerObject.classe
+
+						local auraData = combat.aura_timeline[playerObject and playerObject.serial]
+
+						--if the button to show only auras are pressed
+						local onlyShowAuras = castLog.db.only_auras
+						local onlyShowCooldowns = castLog.db.only_cooldowns
+
+						--cast data
+						for i = 1, #castData do
+							local cast = castData[i]
+							local atTime = cast[1] --when it was casted
+							local spellId = cast[2] --the spellId of the spell
+							local payload = cast[3] --contains the spell target
+
+							local hasCooldownType = LIB_OPEN_RAID_COOLDOWNS_INFO[spellId] and LIB_OPEN_RAID_COOLDOWNS_INFO[spellId].type
+
+							if (not onlyShowCooldowns or hasCooldownType) then
+								local auraTimers = auraData[spellId]
+								if (auraTimers) then
+									auraTimers = auraTimers.data
+									local foundAuraTimer = false
+
+									for o = 1, #auraTimers do
+										local auraTimer = auraTimers[o]
+
+										if (detailsFramework:IsNearlyEqual(auraTimer[1], atTime, 0.650)) then --when it was applyed, using 650ms as latency compensation
+											foundAuraTimer = true
+
+											local auraActivationData = auraTimer
+											local applied = auraActivationData[1]
+											local wentOff = auraActivationData[2]
+											local duration = wentOff - applied
+
+											spellData[spellId] = spellData[spellId] or {}
+											tinsert(spellData[spellId], {applied - combatStartTime, 10, duration, duration, ["payload"] = payload}) --has 4 indexes
+											break
+										end
+									end
+
+									--if this event does not have a duration (if the event has a duration, it has an aura applied)
+									if (not foundAuraTimer) then
+										--if not showing only auras this event can be shown
+										if (not onlyShowAuras) then
+											spellData[spellId] = spellData[spellId] or {}
+											tinsert(spellData[spellId], {atTime - combatStartTime, 1, ["payload"] = payload}) --has 2 indexes
+										end
+									end
+								else
+									if (not onlyShowAuras) then
+										spellData[spellId] = spellData[spellId] or {}
+										tinsert(spellData[spellId], {atTime - combatStartTime, 1, ["payload"] = payload}) --has 2 indexes
+									end
+								end
+							end
+						end
+
+						local scrollData = {
+							length = combatTime,
+							defaultColor = {1, 1, 1, 1},
+							useIconOnBlocks = true,
+							lines = {},
+						}
+
+						do
+							local ignoredSpells = castLog.db.ignored_spells
+							local playerClass = castLog.currentPlayerClass
+							local ignoredSpellsForClass = ignoredSpells[playerClass]
+							local ignoredSpellForAllClasses = ignoredSpells.ALL
+
+							for spellId, spellTimers in pairs(spellData) do
+								--check if the spell isn't ignored
+								if (not ignoredSpellsForClass[spellId] and not ignoredSpellForAllClasses[spellId]) then
+									local spellName, rank, spellIcon = GetSpellInfo(spellId)
+
+									local spellTable = {
+										text = spellName,
+										icon = spellIcon,
+										spellId = spellId,
+										timeline = spellTimers, --each table inside has the .payload
+									}
+									tinsert(scrollData.lines, spellTable)
+								end
+							end
+						end
+
+						tab.frame.timeLineFrame:SetData(scrollData)
+						local minValue = tab.frame.timeLineFrame.scaleSlider:GetMinMaxValues()
+						tab.frame.timeLineFrame.scaleSlider:SetValue(minValue)
+
+						local ignoreSpell = function(self)
+							local spellId = self:GetParent():GetParent().spellId
+							if (spellId) then
+								local ignoredSpells = castLog.db.ignored_spells
+								local classTable = ignoredSpells[castLog.currentPlayerClass]
+
+								if (classTable) then
+									classTable[spellId] = true
+									tab.frame.OpenOptions(1, true)
+									castLog.UpdateTimelineFrame()
+								else
+									detailsFramework:Msg("this actor does not have a class.")
+								end
+							else
+								detailsFramework:Msg("spellId not found for this button.")
+							end
+						end
+
+						local allLines = tab.frame.timeLineFrame.lines
+						for i = 1, #allLines do
+							local lineHeader = allLines[i].lineHeader
+
+							if (not lineHeader.ignoreButtton) then
+								local ignoreButtton = detailsFramework:CreateButton(lineHeader, ignoreSpell, 20, 20, "X", _, _, _, _, _, _, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"), detailsFramework:GetTemplate("font", "OPTIONS_FONT_TEMPLATE"))
+								lineHeader.ignoreButtton = ignoreButtton
+								ignoreButtton:SetPoint("right", lineHeader, "right", -2, 0)
+								ignoreButtton:SetBackdropColor(.1, .1, .1, .7)
+								ignoreButtton.onleave_backdrop = {.1, .1, .1, .7}
+								ignoreButtton.onenter_backdrop = {.3, .3, .3, .7}
+								ignoreButtton:SetBackdropBorderColor(0, 0, 0, 0)
+								ignoreButtton.onenter_backdrop_border_color = {0, 0, 0, 0}
+								ignoreButtton.onleave_backdrop_border_color = {0, 0, 0, 0}
+							else
+								lineHeader.ignoreButtton:SetClickFunction(ignoreSpell)
+							end
+
+							lineHeader.ignoreButtton:SetAlpha(1)
+						end
+					else
+						--this player has no timeline data to show
+						--clear the timeline frame, or unselect it and show the overall spells breakdown
+						print("there's no data for player", playerObject and playerObject.nome)
+					end
 				end
 
 				castLog.UpdateShowButtons()
@@ -346,16 +516,28 @@ do
 				--reset
 				frame.showOnlyCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
 				frame.showOnlyAurasButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
+				frame.showPlayersAttackCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
+				frame.showPlayersDefenseCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
 
 				if (castLog.db.only_cooldowns) then
 					frame.showOnlyCooldownsButton:SetTemplate("DETAILS_TAB_BUTTONSELECTED_TEMPLATE")
 
 				elseif (castLog.db.only_auras) then
 					frame.showOnlyAurasButton:SetTemplate("DETAILS_TAB_BUTTONSELECTED_TEMPLATE")
+
+				elseif (castLog.db.only_players_attack_cooldowns) then
+					frame.showPlayersAttackCooldownsButton:SetTemplate("DETAILS_TAB_BUTTONSELECTED_TEMPLATE")
+
+				elseif (castLog.db.only_players_defensive_cooldowns) then
+					frame.showPlayersDefenseCooldownsButton:SetTemplate("DETAILS_TAB_BUTTONSELECTED_TEMPLATE")
 				end
 
-				frame.showOnlyCooldownsButton:SetSize(120, 18)
-				frame.showOnlyAurasButton:SetSize(120, 18)
+				local width = 120
+				local height = 20
+				frame.showOnlyCooldownsButton:SetSize(width, height)
+				frame.showOnlyAurasButton:SetSize(width, height)
+				frame.showPlayersAttackCooldownsButton:SetSize(width + 40, height)
+				frame.showPlayersDefenseCooldownsButton:SetSize(width + 40, height)
 			end
 
 			--reset zoom button
@@ -683,18 +865,60 @@ do
 				mergedSpellsButton:Hide()
 
 			--show only cooldowns
-			local showOnlyCooldownsButton = detailsFramework:CreateButton(frame, function() castLog.db.only_cooldowns = not castLog.db.only_cooldowns; castLog.db.only_auras = false; castLog.UpdateTimelineFrame() end, 120, 20, "Only Cooldowns", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
+			local showOnlyCooldownsButton_Func = function()
+				castLog.db.only_auras = false
+				castLog.db.only_cooldowns = not castLog.db.only_cooldowns
+				castLog.db.only_players_attack_cooldowns = false
+				castLog.db.only_players_defensive_cooldowns = false
+				castLog.UpdateTimelineFrame()
+			end
+			local showOnlyCooldownsButton = detailsFramework:CreateButton(frame, showOnlyCooldownsButton_Func, 120, 20, "Only Cooldowns", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
 				showOnlyCooldownsButton:SetPoint("left", ignoredSpellsButton, "right", 2, 0)
 				showOnlyCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
 				showOnlyCooldownsButton:SetIcon([[Interface\AddOns\Details\images\spec_icons_normal_alpha]], nil, nil, nil, {256/512, 320/512, 128/512, 192/512})
 				frame.showOnlyCooldownsButton = showOnlyCooldownsButton
 
 			--show only auras
-			local showOnlyAurasButton = detailsFramework:CreateButton(frame, function() castLog.db.only_auras = not castLog.db.only_auras; castLog.db.only_cooldowns = false; castLog.UpdateTimelineFrame() end, 120, 20, "Only Auras", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
+			local showOnlyAurasButton_Func = function()
+				castLog.db.only_auras = not castLog.db.only_auras
+				castLog.db.only_cooldowns = false
+				castLog.db.only_players_attack_cooldowns = false
+				castLog.db.only_players_defensive_cooldowns = false
+				castLog.UpdateTimelineFrame()
+			end
+			local showOnlyAurasButton = detailsFramework:CreateButton(frame, showOnlyAurasButton_Func, 120, 20, "Only Auras", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
 				showOnlyAurasButton:SetPoint("left", showOnlyCooldownsButton, "right", 2, 0)
 				showOnlyAurasButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
 				showOnlyAurasButton:SetIcon([[Interface\AddOns\Details\images\spec_icons_normal_alpha]], nil, nil, nil, {320/512, 384/512, 128/512, 192/512})
 				frame.showOnlyAurasButton = showOnlyAurasButton
+
+			--players attack cooldowns usage
+			local showPlayersAttackCooldownsButton_Func = function()
+				castLog.db.only_auras = false
+				castLog.db.only_cooldowns = false
+				castLog.db.only_players_attack_cooldowns = not castLog.db.only_players_attack_cooldowns
+				castLog.db.only_players_defensive_cooldowns = false
+				castLog.UpdateTimelineFrame()
+			end
+			local showPlayersAttackCooldownsButton = detailsFramework:CreateButton(frame, showPlayersAttackCooldownsButton_Func, 120, 20, "Raid Attack Cooldowns", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
+				showPlayersAttackCooldownsButton:SetPoint("left", showOnlyAurasButton, "right", 2, 0)
+				showPlayersAttackCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
+				showPlayersAttackCooldownsButton:SetIcon([[Interface\AddOns\Details\images\spec_icons_normal_alpha]], nil, nil, nil, {256/512, 320/512, 256/512, 320/512})
+				frame.showPlayersAttackCooldownsButton = showPlayersAttackCooldownsButton
+
+			--players defensive cooldowns usage
+			local showPlayersDefensiveCooldownsButton_Func = function()
+				castLog.db.only_auras = false
+				castLog.db.only_cooldowns = false
+				castLog.db.only_players_attack_cooldowns = false
+				castLog.db.only_players_defensive_cooldowns = not castLog.db.only_players_defensive_cooldowns
+				castLog.UpdateTimelineFrame()
+			end
+			local showPlayersDefenseCooldownsButton = detailsFramework:CreateButton(frame, showPlayersDefensiveCooldownsButton_Func, 120, 20, "Raid Defensive Cooldowns", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
+			showPlayersDefenseCooldownsButton:SetPoint("left", showPlayersAttackCooldownsButton, "right", 2, 0)
+			showPlayersDefenseCooldownsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
+			showPlayersDefenseCooldownsButton:SetIcon([[Interface\AddOns\Details\images\spec_icons_normal_alpha]], nil, nil, nil, {64/512, 128/512, 256/512, 320/512})
+			frame.showPlayersDefenseCooldownsButton = showPlayersDefenseCooldownsButton
 		end
 
 		local iconSettings = {
@@ -929,8 +1153,11 @@ do
 					},
 
 					user_blacklisted_spells = {},
+
 					only_cooldowns = false,
 					only_auras = false,
+					only_players_attack_cooldowns = false,
+					only_players_defensive_cooldowns = false,
 				}
 
 				--install: install -> if successful installed; saveddata -> a table saved inside details db, used to save small amount of data like configs
