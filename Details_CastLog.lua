@@ -29,7 +29,7 @@ do
 
 	--minimal details version required to run this plugin
 	local MINIMAL_DETAILS_VERSION_REQUIRED = 136
-	local CASTLOG_VERSION = "v2.0.0"
+	local CASTLOG_VERSION = "v2.1.0"
 
 	local CONST_COOLDOWN_TYPE_OFFENSIVE = 1
 	local CONST_COOLDOWN_TYPE_DEFENSIVE_PERSONAL = 2
@@ -1084,6 +1084,8 @@ do
 						},
 						["SHAMAN"] = {
 						},
+						["EVOKER"] = {
+						},
 						["ALL"] = {
 							[324748] = true, --celestial guidance (enchant)
 							[196711] = true, --remorseless winter
@@ -1148,6 +1150,10 @@ do
 
 						},
 						["SHAMAN"] = {
+
+						},
+
+						["EVOKER"] = {
 
 						},
 					},
