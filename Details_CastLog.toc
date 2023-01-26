@@ -1,4 +1,4 @@
-## Interface: 100002
+## Interface: 100005
 ## Title: Details! Cast Log (plugin)
 ## Notes: Records log of spell casting for each player in the group
 ## RequiredDeps: Details
