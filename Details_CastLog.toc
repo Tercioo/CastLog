@@ -1,6 +1,6 @@
 ## Interface: 100007
 ## Title: Details! Cast Log (plugin)
-## Notes: Records log of spell casting for each player in the group
+## Notes: Records log of spell casting for each player in the group.
 ## RequiredDeps: Details
 
 ## X-Curse-Project-ID: 693528
