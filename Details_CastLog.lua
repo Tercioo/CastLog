@@ -88,7 +88,7 @@ do
 
 	function castLog.InstallTab()
 		local tabName = "CastTimeline"
-		local tabNameLoc = "Timeline"
+		local tabNameLoc = "Cast Log"
 
 		local canShowTab = function(tabOBject, playerObject)
 			local combat = Details:GetCombatFromBreakdownWindow()
