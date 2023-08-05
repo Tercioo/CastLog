@@ -394,7 +394,7 @@ do
 			local gameCooltip = _G.GameCooltip
 
 			local timeLineFrame = detailsFramework:CreateTimeLineFrame(frame, "$parentTimeLine", { --general options
-				width = 865, height = 416,
+				width = 900, height = 465,
 
 				backdrop_color = {1, 1, 1, .1}, --line backdrop
 				backdrop_color_highlight = {1, 1, 1, .3},
@@ -855,7 +855,7 @@ do
 			frame.OpenOptions = openOptions
 
 			local ignoredSpellsButton = detailsFramework:CreateButton(frame, function() openOptions(1) end, 120, 20, "Ignored Spells", nil, nil, nil, nil, nil, nil, detailsFramework:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE"))
-				ignoredSpellsButton:SetPoint("bottomleft", frame, "bottomleft", 0, 18)
+				ignoredSpellsButton:SetPoint("bottomleft", frame, "bottomleft", 0, 0)
 				ignoredSpellsButton:SetTemplate("DETAILS_TAB_BUTTON_TEMPLATE")
 				ignoredSpellsButton:SetIcon([[Interface\GLUES\LOGIN\Glues-CheckBox-Check]])
 				ignoredSpellsButton:SetSize(120, 18)
