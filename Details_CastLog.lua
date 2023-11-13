@@ -1334,13 +1334,47 @@ do
 					end,
 				}
 
+				local unitCache = {}
+				local bitBand = bit.band
+				local OBJECT_TYPE_PLAYER =	0x00000400
+				local Ambiguate = Ambiguate
+
 				combatLogReader:SetScript("OnEvent", function(self)
-					local timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical = CombatLogGetCurrentEventInfo()
+					local timew, token, hidding, sourceSerial, sourceName, sourceFlags, sourceFlag2, targetSerial, targetName, targetFlags, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical = CombatLogGetCurrentEventInfo()
+
+					if (sourceName) then
+						if (unitCache[sourceName]) then
+							sourceName = unitCache[sourceName]
+						else
+							--detect if this is player by reading the flags
+							if (bitBand(sourceFlags, OBJECT_TYPE_PLAYER) ~= 0) then
+								sourceName = Ambiguate(sourceName, "none")
+								unitCache[sourceName] = sourceName
+							else
+								unitCache[sourceName] = sourceName
+							end
+						end
+					end
+
+					if (targetName) then
+						if (unitCache[targetName]) then
+							targetName = unitCache[targetName]
+						else
+							--detect if this is player by reading the flags
+							if (bitBand(targetFlags, OBJECT_TYPE_PLAYER) ~= 0) then
+								targetName = Ambiguate(targetName, "none")
+								unitCache[targetName] = targetName
+							else
+								unitCache[targetName] = targetName
+							end
+						end
+					end
+
 					local func = eventFunc[token]
 					if (func) then
 						--check if the event is from the player or from the group
 						if (sourceName and spellId and isUnitInTheGroup(sourceName)) then --need to check this point if it is passing if others
-							func(timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
+							func(timew, token, hidding, sourceSerial, sourceName, sourceFlags, sourceFlag2, targetSerial, targetName, targetFlags, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
 						end
 					end
 				end)
