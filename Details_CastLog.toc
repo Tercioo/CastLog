@@ -2,6 +2,7 @@
 ## Title: Details! Cast Log (plugin)
 ## Notes: Records log of spell casting for each player in the group.
 ## RequiredDeps: Details
+## IconTexture: Interface\AddOns\Details\images\minimap
 
 ## X-Curse-Project-ID: 693528
 ## X-Wago-ID: q96dkONO
