@@ -1968,6 +1968,13 @@ do
 
 				castLog.UpdateSpellCache()
 
+				---@class caststartdata : table
+				---@field time number
+				---@field spellId number
+				
+				---@type table<guid, caststartdata>
+				local playerCurrentCastingCache = {}
+
 				local eventFunc = {
 					["SPELL_AURA_APPLIED"] = function(timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
 						local GUID = sourceSerial
@@ -2037,6 +2044,11 @@ do
 						end
 					end,
 
+					["SPELL_CAST_START"] = function(timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
+						playerCurrentCastingCache[sourceSerial] = {time = GetTime(), spellId = spellId}
+
+					end,
+
 					["SPELL_CAST_SUCCESS"] = function(timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
 						--local unitId, castGUID, spellId = ...
 						--local castSent = castLog.sentSpellCache[castGUID]
@@ -2066,7 +2078,13 @@ do
 								if (castLog.inCombat) then
 									local playerCastTable = castLog.combatCastLogData.spells_cast_timeline[GUID]
 									if (playerCastTable) then
-										tinsert(playerCastTable, {GetTime(), spellId, target})
+										local currentCasting = playerCurrentCastingCache[GUID]
+										if (currentCasting and currentCasting.spellId == spellId) then
+											playerCurrentCastingCache[GUID] = nil
+											tinsert(playerCastTable, {currentCasting.time, spellId, target})
+										else
+											tinsert(playerCastTable, {GetTime(), spellId, target})
+										end
 									end
 								else
 									local playerPreCastCache = preCastCache[GUID]
