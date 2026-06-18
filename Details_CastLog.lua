@@ -1695,6 +1695,9 @@ do
 	end
 
 	function castLog.OnCombatStart(combatObject)
+		if not combatObject then
+			combatObject = {GetCombatUID=function() return Details.combat_counter+1 end}
+		end
 		--start
 		castLog.inCombat = true
 		castLog.currentCombat =  combatObject
@@ -1730,34 +1733,36 @@ do
 		---@cast combatObject combat
 
 		--close aura timers
-		if (castLog.currentCombat ~= combatObject) then
-			return
-		end
+		if not detailsFramework.IsAddonApocalypseWow() then
+			if (castLog.currentCombat ~= combatObject) then
+				return
+			end
 
-		if (combatObject) then
-			local uniqueCombatId = combatObject:GetCombatUID()
-			local currentCastLogData = castLog.combatCastLogData
+			if (combatObject) then
+				local uniqueCombatId = combatObject:GetCombatUID()
+				local currentCastLogData = castLog.combatCastLogData
 
-			if (currentCastLogData and uniqueCombatId and uniqueCombatId == currentCastLogData.combatId) then
-				local combatTime = combatObject:GetCombatTime() --seconds elapsed
-				local combatStartTime = combatObject:GetStartTime() --gettime
+				if (currentCastLogData and uniqueCombatId and uniqueCombatId == currentCastLogData.combatId) then
+					local combatTime = combatObject:GetCombatTime() --seconds elapsed
+					local combatStartTime = combatObject:GetStartTime() --gettime
 
-				currentCastLogData.combatTime = combatTime
-				currentCastLogData.combatStartTime = combatStartTime
-				currentCastLogData.aura_timeline = currentCastLogData.aura_timeline or {}
+					currentCastLogData.combatTime = combatTime
+					currentCastLogData.combatStartTime = combatStartTime
+					currentCastLogData.aura_timeline = currentCastLogData.aura_timeline or {}
 
-				for GUID, playerAuraTable in pairs(currentCastLogData.aura_timeline) do
-					for spellId, auraTable in pairs(playerAuraTable) do
-						if (auraTable.enabled) then
-							auraTable.enabled = false
-							auraTable.amountUp = 0
-							tinsert(auraTable.data, {auraTable.appliedAt, GetTime()}) --when it was applied and when it went off
+					for GUID, playerAuraTable in pairs(currentCastLogData.aura_timeline) do
+						for spellId, auraTable in pairs(playerAuraTable) do
+							if (auraTable.enabled) then
+								auraTable.enabled = false
+								auraTable.amountUp = 0
+								tinsert(auraTable.data, {auraTable.appliedAt, GetTime()}) --when it was applied and when it went off
+							end
 						end
 					end
 				end
-			end
 
-			castLog.currentCombat = nil
+				castLog.currentCombat = nil
+			end
 		end
 
 		wipe(castLog.sentSpellCache)
@@ -1790,6 +1795,11 @@ do
 				function castLog:OnDetailsEvent(event, ...)
 					return onDetailsEvent(event, ...)
 				end
+
+				--registering details events we need
+				Details:RegisterEvent(castLog, "COMBAT_PLAYER_ENTER") --when details creates a new segment, not necessary the player entering in combat.
+				Details:RegisterEvent(castLog, "COMBAT_PLAYER_LEAVE") --when details finishs a segment, not necessary the player leaving the combat.
+				Details:RegisterEvent(castLog, "DETAILS_DATA_RESET") --details combat data has been wiped
 
 				local default_options = {
 					imported_cast_logs = {},
@@ -1924,10 +1934,6 @@ do
 
 				castLog.db = CastLogDB
 
-				--registering details events we need
-				Details:RegisterEvent(castLog, "COMBAT_PLAYER_ENTER") --when details creates a new segment, not necessary the player entering in combat.
-				Details:RegisterEvent(castLog, "COMBAT_PLAYER_LEAVE") --when details finishs a segment, not necessary the player leaving the combat.
-				Details:RegisterEvent(castLog, "DETAILS_DATA_RESET") --details combat data has been wiped
 
 				castLog.sentSpellCache = {}
 				castLog.InstallTab()
@@ -1953,7 +1959,7 @@ do
 
 				--combatlog parser
 				local combatLogReader = CreateFrame("frame")
-				combatLogReader:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+				--combatLogReader:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 				local CombatLogGetCurrentEventInfo = _G.CombatLogGetCurrentEventInfo
 				castLog.combatLogReader = combatLogReader
 
@@ -1975,9 +1981,128 @@ do
 				---@class caststartdata : table
 				---@field time number
 				---@field spellId number
-				
+
 				---@type table<guid, caststartdata>
 				local playerCurrentCastingCache = {}
+
+				--12.0.0
+				if detailsFramework.IsAddonApocalypseWow() then
+					local eventFrame = CreateFrame("frame")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_START")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_SENT")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_SUCCEEDED")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_INTERRUPTED")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_FAILED_QUIET")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_FAILED")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_DELAYED")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_CHANNEL_START")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_CHANNEL_STOP")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_CHANNEL_UPDATE")
+					eventFrame:RegisterEvent ("UNIT_SPELLCAST_STOP")
+					eventFrame:RegisterEvent ("PLAYER_REGEN_DISABLED")
+					eventFrame:RegisterEvent ("PLAYER_REGEN_ENABLED")
+
+					eventFrame:SetScript("OnEvent", function(self, event, ...)
+						if event == "PLAYER_REGEN_DISABLED" then
+							castLog.OnCombatStart(...)
+
+						elseif (event == "PLAYER_REGEN_ENABLED") then
+							castLog.OnCombatEnd(...)
+
+						elseif (event == "UNIT_SPELLCAST_START") then
+							--spell, rank (secret), id (secret),
+							local unitId, castGUID, spellId = ...
+							if unitId == "player" then
+								local sourceSerial = UnitGUID(unitId)
+								playerCurrentCastingCache[sourceSerial] = {time = GetTime(), spellId = spellId}
+							end
+
+						elseif (event == "UNIT_SPELLCAST_SUCCEEDED") then
+							--local unitID, spell, rank, id, spellID = ...
+							local unitId, castGUID, spellId = ...
+
+							if unitId == "player" then
+								local sourceSerial = UnitGUID(unitId)
+
+								--check the options for ignored or marged spells
+								if (ignoredSpellsClass[spellId]) then
+									return
+								elseif (ignoredSpellsAll[spellId]) then
+									return
+								end
+
+								spellId = mergedSpells[spellId] or spellId
+
+								if (castLog.inCombat) then
+									local playerCastTable = castLog.combatCastLogData.spells_cast_timeline[sourceSerial]
+									if (playerCastTable) then
+										local currentCasting = playerCurrentCastingCache[sourceSerial]
+										if (currentCasting and currentCasting.spellId == spellId) then
+											playerCurrentCastingCache[sourceSerial] = nil
+											tinsert(playerCastTable, {currentCasting.time, spellId, ""}) --"" was target
+										else
+											tinsert(playerCastTable, {GetTime(), spellId, ""}) --"" was target
+										end
+									else
+										--print("no playerCastTable")
+									end
+								else
+									--print("not in combat")
+								end
+							end
+
+							do return end
+
+							if unitID == "player" then
+								local target = targetName
+								local caster = sourceName
+								--local spellId = spellId
+
+								local isUnitInGroup = isUnitInTheGroup(sourceName)
+
+								if (caster and spellId and isUnitInGroup) then --need to check if this is passing
+									local GUID = sourceSerial
+									if (GUID) then
+
+
+										spellId = mergedSpells[spellId] or spellId
+
+										if (castLog.inCombat) then
+											local playerCastTable = castLog.combatCastLogData.spells_cast_timeline[GUID]
+											if (playerCastTable) then
+												local currentCasting = playerCurrentCastingCache[GUID]
+												if (currentCasting and currentCasting.spellId == spellId) then
+													playerCurrentCastingCache[GUID] = nil
+													tinsert(playerCastTable, {currentCasting.time, spellId, target})
+												else
+													tinsert(playerCastTable, {GetTime(), spellId, target})
+												end
+											end
+										else
+											local playerPreCastCache = preCastCache[GUID]
+
+											if (not playerPreCastCache) then
+												preCastCache[GUID] = {}
+												playerPreCastCache = preCastCache[GUID]
+											else
+												table.remove(playerPreCastCache, 3)
+											end
+
+											---@type spellinfo
+											local spellInfo = C_Spell.GetSpellInfo(spellId)
+											local castTime = spellInfo.castTime or 0.00001
+											castTime = castTime / 1000
+
+											local castStartedAt = GetTime() - castTime
+											table.insert(playerPreCastCache, 1, {castStartedAt, spellId, target})
+										end
+									end
+								end
+							end
+						end
+					end)
+				end
+
 
 				local eventFunc = {
 					["SPELL_AURA_APPLIED"] = function(timew, token, hidding, sourceSerial, sourceName, sourceFlag, sourceFlag2, targetSerial, targetName, targetFlag, targetFlag2, spellId, spellName, spellType, amount, overKill, school, resisted, blocked, absorbed, isCritical)
